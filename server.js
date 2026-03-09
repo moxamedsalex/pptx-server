@@ -6,7 +6,6 @@ const app = express();
 app.use(express.json({ limit: "50mb" }));
 
 const NAVY       = "156082";
-const TEAL       = "04AF87";
 const TRANSIT_BG = "FFCCCC";
 const DIRECT_BG  = "CCFFCC";
 const WHITE      = "FFFFFF";
@@ -25,6 +24,7 @@ async function mkIcon(svg) {
 }
 
 async function generatePPTX(flights, legLabel, missionDate) {
+
   const pinPng = await mkIcon(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
     <path d="M16 2C10.48 2 6 6.48 6 12c0 7.5 10 18 10 18S26 19.5 26 12c0-5.52-4.48-10-10-10z" fill="#11A77C"/>
     <circle cx="16" cy="12" r="4" fill="white"/><circle cx="16" cy="12" r="2" fill="#11A77C"/></svg>`);
@@ -54,10 +54,14 @@ async function generatePPTX(flights, legLabel, missionDate) {
   const pres = new pptxgen();
   pres.layout = "LAYOUT_WIDE";
 
+  // Build date map for alternating row colors
+  // Use num to alternate since date may not always be present
   const dateMap = {};
   let di = 0;
   for (const f of flights) {
-    if (!(f.date in dateMap)) dateMap[f.date] = di++ % 2;
+    const key = f.date || String(Math.ceil(f.num / 3));
+    if (!(key in dateMap)) dateMap[key] = di++ % 2;
+    f._bgKey = key;
   }
 
   const s = pres.addSlide();
@@ -99,37 +103,45 @@ async function generatePPTX(flights, legLabel, missionDate) {
   const rowHArr = [0.72];
 
   for (const f of flights) {
-    const bg = dateMap[f.date] === 0 ? WHITE : GREY;
-    const c_ = (t, ex={}) => ({ text:t, options:{ fill:{color:bg}, color:DARK, fontSize:12, align:"center", valign:"middle", fontFace:FONT, ...ex }});
-    const m_ = (t, ex={}) => ({ text:t, options:{ fill:{color:bg}, color:DARK, fontSize:12, align:"center", valign:"middle", fontFace:FONT, rowspan:2, ...ex }});
+    const bg = dateMap[f._bgKey] === 0 ? WHITE : GREY;
+    const c_ = (t, ex={}) => ({ text:t||"", options:{ fill:{color:bg}, color:DARK, fontSize:12, align:"center", valign:"middle", fontFace:FONT, ...ex }});
+    const m_ = (t, ex={}) => ({ text:t||"", options:{ fill:{color:bg}, color:DARK, fontSize:12, align:"center", valign:"middle", fontFace:FONT, rowspan:2, ...ex }});
+
+    // Get day and date from departure time if available
+    const l0 = f.legs && f.legs[0];
+    if (!l0) continue;
+
+    const depDate = f.date || "";
+    const depDay  = f.day  || "";
 
     if (f.direct) {
-      const l = f.legs[0];
+      const l = l0;
       rows.push([
         m_(String(f.num), { color:DARK, fontSize:13 }),
-        m_(f.day), m_(f.date), m_(f.airline, { bold:true }),
-        m_(`${l.from}\n${l.ft}`), m_(`${l.to}\n${l.at}`),
-        m_(l.no), m_(l.dur),
-        c_(l.total),
+        m_(depDay), m_(depDate), m_(f.airline||"", { bold:true }),
+        m_(`${l.from||""}\n${l.ft||""}`), m_(`${l.to||""}\n${l.at||""}`),
+        m_(l.no||""), m_(l.dur||""),
+        c_(l.total||""),
         m_(" ")
       ]);
       rows.push([
         { text:"Direct →", options:{ fill:{color:DIRECT_BG}, color:"2E7D32", bold:true, fontSize:12, align:"center", valign:"middle", fontFace:FONT }}
       ]);
     } else {
-      const l1 = f.legs[0], l2 = f.legs[1];
+      const l1 = l0;
+      const l2 = f.legs[1] || {};
       rows.push([
         m_(String(f.num), { color:DARK, fontSize:13 }),
-        m_(f.day), m_(f.date), m_(f.airline, { bold:true }),
-        c_(`${l1.from}\n${l1.ft}`), c_(`${l1.to}\n${l1.at}`),
-        c_(l1.no), c_(l1.dur),
-        c_(l1.total),
+        m_(depDay), m_(depDate), m_(f.airline||"", { bold:true }),
+        c_(`${l1.from||""}\n${l1.ft||""}`), c_(`${l1.to||""}\n${l1.at||""}`),
+        c_(l1.no||""), c_(l1.dur||""),
+        c_(l1.total||""),
         m_(" ")
       ]);
       rows.push([
-        c_(`${l2.from}\n${l2.ft}`), c_(`${l2.to}\n${l2.at}`),
-        c_(l2.no), c_(l2.dur),
-        { text:l2.transit, options:{ fill:{color:TRANSIT_BG}, color:"CC0000", fontSize:12, align:"center", valign:"middle", fontFace:FONT }}
+        c_(`${l2.from||""}\n${l2.ft||""}`), c_(`${l2.to||""}\n${l2.at||""}`),
+        c_(l2.no||""), c_(l2.dur||""),
+        { text:l2.transit||"", options:{ fill:{color:TRANSIT_BG}, color:"CC0000", fontSize:12, align:"center", valign:"middle", fontFace:FONT }}
       ]);
     }
     rowHArr.push(ROW_H, ROW_H);
@@ -156,11 +168,12 @@ async function generatePPTX(flights, legLabel, missionDate) {
   let cy = HEADER_H + 0.07 + rowHArr[0];
 
   for (const f of flights) {
-    const bg = dateMap[f.date] === 0 ? WHITE : GREY;
+    if (!f.legs || !f.legs[0]) continue;
+    const bg = dateMap[f._bgKey] === 0 ? WHITE : GREY;
     const iy = cy + (cellH - ICON_S) / 2;
     if (f.cls === "First")    s.addImage({ data:starPng, x:iconX, y:iy, w:ICON_S, h:ICON_S });
     if (f.cls === "Business") s.addImage({ data:bagPng,  x:iconX, y:iy, w:ICON_S, h:ICON_S });
-    s.addText(f.cls, {
+    s.addText(f.cls||"", {
       x:textX, y:cy, w:TXT_W, h:cellH,
       fontSize:12, color:DARK, fontFace:FONT,
       align:"left", valign:"middle",
@@ -178,7 +191,6 @@ async function generatePPTX(flights, legLabel, missionDate) {
   return buffer;
 }
 
-// MAIN ENDPOINT
 app.post("/generate", async (req, res) => {
   try {
     const { flights, legLabel, missionDate } = req.body;
