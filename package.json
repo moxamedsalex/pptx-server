@@ -1,0 +1,13 @@
+{
+  "name": "pptx-server",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "pptxgenjs": "^3.12.0",
+    "sharp": "^0.33.2"
+  }
+}
